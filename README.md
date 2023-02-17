@@ -6,9 +6,9 @@ Challenges created by [@tinchoabbate](https://twitter.com/tinchoabbate) at [damn
 
 ## #1 - Unstoppable
 
-The goal of this challenge is to disable flash loan lender contract. Some kind of DoS attack.
+The goal of this challenge is to disable flash loan lender contract. We are looking for DoS attack.
 
-Vulnerability is inside **flashLoan()** function.
+Vulnerability is located inside **flashLoan()** function in **UnstoppableLender.sol** :
 
 ```solidity
 function flashLoan(uint256 borrowAmount) external nonReentrant {
@@ -29,16 +29,18 @@ function flashLoan(uint256 borrowAmount) external nonReentrant {
 }
 ```
 
-In order to disable contract from offering flash loans, we need to break one of safety checks inside the function.
+In order to disable contract from offering flash loans, we need to break one of the 4 safety checks inside the function.
 
-Particiullary interesting line:
+Particiullary interesting one:
 
 ```solidity
 // Ensured by the protocol via the `depositTokens` function
 assert(poolBalance == balanceBefore);
 ```
 
-The contract is making sure that contract balance of DVT token (`balanceBefore`) is matching the inner contract logic balance that is updated when user deposits token using `depositTokens` function (`poolBalance`).
+The assert statement is making sure that contract balance of DVT token (`balanceBefore`) is matching the inner contract logic balance (`poolBalance`) that is updated when user deposits tokens using `depositTokens` function.
+
+It assumes that no external transfers will occur, which is a flawed assumption.
 
 We can exploit this by transferring DVT tokens to contract with ERC20 `transfer` function.
 
