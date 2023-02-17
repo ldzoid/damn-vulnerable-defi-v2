@@ -12,8 +12,6 @@ DO NOT USE IN PRODUCTION.
 
 ## #1 - Unstoppable
 
----
-
 The goal of this challenge is to disable flash loan lender contract. We are looking for DoS attack.
 
 Vulnerability is located inside **flashLoan()** function in **UnstoppableLender.sol** :
@@ -66,8 +64,6 @@ it('Exploit', async function () {
 ```
 
 ## #2 - Naive Receiver
-
----
 
 This challange might be tricky at first. Goal is not to attack lender, rather we need to drain funds from receiver even though vulnerability is inside lender's contract.
 
