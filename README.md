@@ -294,6 +294,7 @@ contract SideEntranceAttack {
 **side-entrance.challenge.js**
 
 ```js
+// ...
 it('Exploit', async function () {
   /** CODE YOUR EXPLOIT HERE */
   const AttackFactory = await ethers.getContractFactory(
@@ -304,4 +305,5 @@ it('Exploit', async function () {
 
   await attackContract.attack(ETHER_IN_POOL);
 });
+// ...
 ```
