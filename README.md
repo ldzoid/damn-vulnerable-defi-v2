@@ -312,7 +312,7 @@ it('Exploit', async function () {
 
 The Rewarder challange stepped up in complexity from previous challanges, it might be intimidating at first. We have 2 pools, **FlashLoanerPool.sol** offering flash loans, **TheRewarderPool.sol** offering reward tokens every 5 days to those who deposit DVT token. The goal is to win majority of rewards.
 
-In order to beat the challenge we must own the majority of deposited reward pool liquidity tokens, and flash loan contract offers loans in.. you guessed it, liquidity tokens!
+In order to beat the challenge we must own the majority of deposited reward pool liquidity tokens, and flash loan contract offers loans in.. you guessed it, DVT liquidity tokens!
 
 **AccountingToken.sol** is used inside Reward pool for inside accounting logic to track who deposited what amount etc.
 
@@ -331,7 +331,7 @@ function deposit(uint256 amountToDeposit) external {
 }
 ```
 
-As we can see pool distributes rewards each time we deposit liquidity tokens. The condition is though, is must have been 5 days from last time since you can get rewards once per round and each round lasts 5 days.
+As we can see pool distributes rewards each time we deposit liquidity tokens. The condition is though, it must have been 5 days from last time since you can get rewards once per round and each round lasts 5 days.
 
 Finally, we will exploit this `deposit` function with flash loan from **FlashLoanerPool.sol**. We can deposit the loan in **TheRewarderPool.sol** and get most of rewards. Once we receive rewards, we will withdraw tokens and pay back the loan to lender.
 
