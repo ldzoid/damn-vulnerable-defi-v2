@@ -4,7 +4,7 @@
 
 Challenges created by [@tinchoabbate](https://twitter.com/tinchoabbate) at [damnvulnerabledefi.xyz](https://www.damnvulnerabledefi.xyz/).
 
-## #1 - Unstoppable
+## 1 - Unstoppable
 
 The goal of this challenge is to disable flash loan lender contract. We are looking for DoS attack.
 
@@ -59,7 +59,7 @@ it('Exploit', async function () {
 // ...
 ```
 
-## #2 - Naive Receiver
+## 2 - Naive Receiver
 
 This challange might be tricky at first. Goal is not to attack lender, rather we need to drain funds from receiver even though vulnerability is inside lender's contract.
 
@@ -137,7 +137,7 @@ it('Exploit', async function () {
 // ...
 ```
 
-## #3 - Truster
+## 3 - Truster
 
 Again, we have a flash loan lender contract. Goal is to drain all the funds from the pool. It offers flash loans for free, but has one big flaw.
 
@@ -235,7 +235,7 @@ it('Exploit', async function () {
 // ...
 ```
 
-## #4 - Side Entrance
+## 4 - Side Entrance
 
 This time our flash loan lender comes with additional funcitonality. It acts as a vault, so basically anyone can deposit their ether and withdraw at any time. Stacked ether is used to lend flash loans with no extra fees.
 
