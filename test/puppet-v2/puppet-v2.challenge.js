@@ -113,9 +113,6 @@ describe('[Challenge] Puppet v2', function () {
 
   it('Exploit', async function () {
     /** CODE YOUR EXPLOIT HERE */
-    // devalue token inside uniswap
-    // borrow 100000 tokens frome exchange
-    // set pool to original ratio
     const attackWeth = this.weth.connect(attacker);
     const attackToken = this.token.connect(attacker);
     const attackRouter = this.uniswapRouter.connect(attacker);

