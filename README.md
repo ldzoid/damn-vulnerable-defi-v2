@@ -2,7 +2,9 @@
 
 # Damn Vulnerable DeFi solutions (v2)
 
-Challenges created by [@tinchoabbate](https://twitter.com/tinchoabbate) at [damnvulnerabledefi.xyz](https://www.damnvulnerabledefi.xyz/).
+Created by [@tinchoabbate](https://twitter.com/tinchoabbate)  
+Website [damnvulnerabledefi.xyz](https://www.damnvulnerabledefi.xyz/)  
+Github repo [v2.0.0](https://github.com/tinchoabbate/damn-vulnerable-defi/tree/v2.0.0)
 
 ## 1 - Unstoppable
 
