@@ -1,10 +1,10 @@
 ![](cover.png)
 
-# Damn Vulnerable DeFi solutions (v2)
+# Solutions - Damn Vulnerable DeFi v2
 
-Created by [@tinchoabbate](https://twitter.com/tinchoabbate)  
+Creator [@tinchoabbate](https://twitter.com/tinchoabbate)  
 Website [damnvulnerabledefi.xyz](https://www.damnvulnerabledefi.xyz/)  
-Github repo [v2.0.0](https://github.com/tinchoabbate/damn-vulnerable-defi/tree/v2.0.0)
+Github [repository](https://github.com/tinchoabbate/damn-vulnerable-defi/tree/v2.0.0)
 
 ## 1 - Unstoppable
 
