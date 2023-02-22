@@ -8,7 +8,7 @@ Github [repository](https://github.com/tinchoabbate/damn-vulnerable-defi/tree/v2
 
 ## 1 - Unstoppable
 
-The goal of this challenge is to disable flash loan lender contract. We are looking for DoS attack.
+The goal of this challenge is to disable flash loan lender contract. We are looking for a DoS attack.
 
 Vulnerability is located inside **flashLoan()** function in **UnstoppableLender.sol** :
 
@@ -31,7 +31,7 @@ function flashLoan(uint256 borrowAmount) external nonReentrant {
 }
 ```
 
-In order to disable contract from offering flash loans, we need to break one of the 4 safety checks inside the function.
+In order to disable the contract from offering flash loans, we need to break one of the 4 safety checks inside the function.
 
 Particiullary interesting one:
 
@@ -40,11 +40,11 @@ Particiullary interesting one:
 assert(poolBalance == balanceBefore);
 ```
 
-The assert statement is making sure that contract balance of DVT token (`balanceBefore`) is matching the inner contract logic balance (`poolBalance`) that is updated when user deposits tokens using `depositTokens` function.
+The assert statement is making sure that the contract balance of the DVT token (`balanceBefore`) is matching the inner contract logic balance (`poolBalance`) that is updated when user deposits tokens using the `depositTokens` function.
 
 It assumes that no external transfers will occur, which is a flawed assumption.
 
-We can exploit this by transferring DVT tokens to contract with ERC20 `transfer` function.
+We can exploit this by transferring DVT tokens to contract with the ERC20 `transfer` function.
 
 Solution code:
 
@@ -63,12 +63,12 @@ it('Exploit', async function () {
 
 ## 2 - Naive Receiver
 
-This challange might be tricky at first. Goal is not to attack lender, rather we need to drain funds from receiver even though vulnerability is inside lender's contract.
+This challenge might be tricky at first. The goal is not to attack the lender, rather we need to drain funds from the receiver even though the vulnerability is inside the lender's contract.
 
-**NaiveReceiverLenderPool.sol** is offering flash loans, but it always takes constant fee of **1 ether**.
-There is nothing wrong with contract's logic, but the way it offers flash loans is not very secure.
+**NaiveReceiverLenderPool.sol** is offering flash loans, but it always takes a constant fee of **1 ether**.
+There is nothing wrong with the contract's logic, but the way it offers flash loans is not very secure.
 
-As we can see from `flashLoan()` function:
+As we can see from the `flashLoan()` function:
 
 ```solidity
 function flashLoan(address borrower, uint256 borrowAmount) external nonReentrant {
@@ -93,9 +93,9 @@ function flashLoan(address borrower, uint256 borrowAmount) external nonReentrant
 }
 ```
 
-It's clear that caller is specifying address of borrower as paramater. So, we can call `flashLoan()` and specify **flashLoanReceiver.sol**'s address as borrower, calling it 10 times would be enough to drain all funds from receiver since 1 loan costs 1 ether in fees.
+It's clear that the caller is specifying an address of the borrower as a paramater. So, we can call the `flashLoan()` and specify **flashLoanReceiver.sol**'s address as the borrower, calling it 10 times would be enough to drain all funds from the receiver since 1 loan costs 1 ether in fees.
 
-We will make new **NaiveReceiverAttack.sol** contract that will essentially call `flashLoan()` 10 times with **flashLoanReceiver.sol**'s address as borrower paramater.
+We will make a new **NaiveReceiverAttack.sol** contract that will essentially call the `flashLoan()` 10 times with **flashLoanReceiver.sol**'s address as borrower paramater.
 
 Solution code:
 
@@ -141,7 +141,7 @@ it('Exploit', async function () {
 
 ## 3 - Truster
 
-Again, we have a flash loan lender contract. Goal is to drain all the funds from the pool. It offers flash loans for free, but has one big flaw.
+Again, we have a flash loan lender contract. The goal is to drain all the funds from the pool. It offers flash loans for free but has one big flaw.
 
 Here is the main function:
 
@@ -165,15 +165,15 @@ function flashLoan(
 }
 ```
 
-As we can see logic seems fine, but `target` paramater and this line of code are critical to understand:
+As we can see logic seems fine, but the `target` parameter and this line of code are critical to understanding:
 
 ```solidity
 target.functionCall(data);
 ```
 
-It is very vulnerable external call. Essentially, pool is making call to `target` contract that **we** specify and it calls function that **we** specify with `data` paramater. Basically we can forward this call to any contract function with `msg.sender` being **pool** contract.
+It is a very vulnerable external call. Essentially, the pool is making a call to the `target` contract that **we** specify and it calls a function that **we** specify with the `data` parameter. Basically, we can forward this call to any contract function with `msg.sender` being **pool** contract.
 
-More specifically we will call **ERC20** token `approve` function and approve ourselves as spender of all pool's tokens. In order to perform this hack in one transaction we will make new **TrusterAttack.sol** contract that will make a malicous loan (approve it's address as pool tokens spender) and transfer all tokens from pool in same function call.
+More specifically we will call **ERC20** token `approve` function and approve ourselves as spender of all pool's tokens. In order to perform this hack in one transaction we will make a new **TrusterAttack.sol** contract that will make a malicious loan (approve its address as pool tokens spender) and transfer all tokens from the pool in the same function call.
 
 Solution code:
 
@@ -239,9 +239,9 @@ it('Exploit', async function () {
 
 ## 4 - Side Entrance
 
-This time our flash loan lender comes with additional funcitonality. It acts as a vault, so basically anyone can deposit their ether and withdraw at any time. Stacked ether is used to lend flash loans with no extra fees.
+This time our flash loan lender comes with additional functionality. It acts as a vault, so basically, anyone can deposit their ether and withdraw at any time. Stacked ether is used to lend flash loans with no extra fees.
 
-We will exploit this contract by taking advantage of insecure accounting logic. Let's take a look at `flashLoan` function.
+We will exploit this contract by taking advantage of insecure accounting logic. Let's take a look at the `flashLoan` function.
 
 ```solidity
 function flashLoan(uint256 amount) external {
@@ -254,9 +254,9 @@ function flashLoan(uint256 amount) external {
 }
 ```
 
-Two requirements seem fine at first, but one scenairo hasn't been accounted for. Once we receive flash loan, nothing prevents us from returning the loan with pool's `deposit` function. That way, inside pool's accounting, we are the owners of deposited funds. Pool balance stayed the same, but inner logic is broken and we are able to withdraw everything.
+Two requirements seem fine at first, but one scenario hasn't been accounted for. Once we receive the flash loan, nothing prevents us from returning the loan with the pool's `deposit` function. That way, inside the pool's accounting, we are the owners of deposited funds. The pool balance stayed the same, but inner logic is broken and we are able to withdraw everything.
 
-For the solution, we will create new **SideEntranceAttack.sol** contract and implement the exploit.
+For the solution, we will create a new **SideEntranceAttack.sol** contract and implement the exploit.
 
 Solution code:
 
@@ -312,11 +312,11 @@ it('Exploit', async function () {
 
 ## 5 - The Rewarder
 
-The Rewarder challange stepped up in complexity from previous challanges, it might be intimidating at first. We have 2 pools, **FlashLoanerPool.sol** offering flash loans, **TheRewarderPool.sol** offering reward tokens every 5 days to those who deposit DVT token. The goal is to win majority of rewards.
+The Rewarder challenge stepped up in complexity from previous challenges, it might be intimidating at first. We have 2 pools, **FlashLoanerPool.sol** offering flash loans, **TheRewarderPool.sol** offering reward tokens every 5 days to those who deposit DVT tokens. The goal is to win the majority of rewards.
 
-In order to beat the challenge we must own the majority of deposited reward pool liquidity tokens, and flash loan contract offers loans in.. you guessed it, DVT liquidity tokens!
+To beat the challenge we must own the majority of deposited reward pool liquidity tokens, and flash loan contract offers loans in... you guessed it, DVT liquidity tokens!
 
-**AccountingToken.sol** is used inside Reward pool for inside accounting logic to track who deposited what amount etc.
+**AccountingToken.sol** is used inside the Reward pool for inside accounting logic to track who deposited what amount etc.
 
 Let's take a look at **TheRewarderPool.sol**'s `deposit` function:
 
@@ -333,11 +333,11 @@ function deposit(uint256 amountToDeposit) external {
 }
 ```
 
-As we can see pool distributes rewards each time we deposit liquidity tokens. The condition is though, it must have been 5 days from last time since you can get rewards once per round and each round lasts 5 days.
+As we can see pool distributes rewards each time we deposit liquidity tokens. The condition is though, it must have been 5 days from the last time since you can get rewards once per round and each round lasts 5 days.
 
-Finally, we will exploit this `deposit` function with flash loan from **FlashLoanerPool.sol**. We can deposit the loan in **TheRewarderPool.sol** and get most of rewards. Once we receive rewards, we will withdraw tokens and pay back the loan to lender.
+Finally, we will exploit this `deposit` function with the flash loan from **FlashLoanerPool.sol**. We can deposit the loan in **TheRewarderPool.sol** and get most of the rewards. Once we receive rewards, we will withdraw tokens and pay back the loan to the lender.
 
-To interact with flash loan lender we need smart contract that will orchestrate the above logic.
+To interact with the flash loan lender we need a smart contract that will orchestrate the above logic.
 
 Solution code:
 
@@ -407,7 +407,7 @@ it('Exploit', async function () {
 
 ## 6 - Selfie
 
-Goal of this challenge is to drain all funds from **SelfiePool.sol**. It looks kind of obvious here:
+The goal of this challenge is to drain all funds from **SelfiePool.sol**. It looks kind of obvious here:
 
 ```solidity
 function drainAllFunds(address receiver) external onlyGovernance {
@@ -418,10 +418,9 @@ function drainAllFunds(address receiver) external onlyGovernance {
 }
 ```
 
-The tricky part is to pass `onlyGovernance` modifier that requires transaction sender to be **SimpleGovernance.sol** contract.
-Governance contract is designed in a way that anyone can submit an action (transaction) and execute it if the action caller has enough votes. What it actually means is that we have to own more than half of total token supply. That is easy since we have lender that offers 75% of whole supply in flash loans.
+The tricky part is to pass the `onlyGovernance` modifier that requires the transaction sender to be **SimpleGovernance.sol** contract. The governance contract is designed in a way that anyone can submit an action (transaction) and execute it if the action caller has enough votes. What it actually means is that we have to own more than half of the total token supply. That is easy since we have a lender that offers 75% of the whole supply in flash loans.
 
-So, to exploit this we will need new **SelfieAttack.sol** contract. It will request the flash loan and queue an action that calls **SelfiePool.sol's** `drainAllFunds`. After paying back the loan, we will wait for queued action to be available for execution since contract requires that at least 2 days have passed.
+So, to exploit this we will need a new **SelfieAttack.sol** contract. It will request the flash loan and queue an action that calls **SelfiePool.sol's** `drainAllFunds`. After paying back the loan, we will wait for queued action to be available for execution since the contract requires that at least 2 days have passed.
 
 Solution code:
 
@@ -485,11 +484,11 @@ it('Exploit', async function () {
 
 ## 7 - Compromised
 
-Solution to this challenge is a litle bit random, I find it very confusing especially for beginners. It doesn't look like real life scenario, but it teaches you some new things, so let's get into it.
+The solution to this challenge is a little bit random, I find it very confusing especially for beginners. It doesn't look like real life scenario, but it teaches you some new things, so let's get into it.
 
-Firstly let's see the contracts. The main contract is **Exchange.sol**, it has simple utility, you can buy and sell NFT for price that is determined inside **TrustfulOracle.sol**. So, most likely we will manipulate the price somehow. The goal is to drain all funds from the exchange, we start with 0.01 eth. Now, if you take a closer look at **TrustfulOracle.sol**, the way it works is that in order to set the price you must have a special role. There is no obvious way to get that role since it's initialized in constructor. But, if you have looked at official instructions for this level on [damnvulnerabledefi.xyz](https://www.damnvulnerabledefi.xyz/), you would've noticed bunch of random confusing numbers.
+Firstly let's see the contracts. The main contract is **Exchange.sol**, it has simple utility, you can buy and sell NFT for a price that is determined inside **TrustfulOracle.sol**. So, most likely we will manipulate the price somehow. The goal is to drain all funds from the exchange, we start with 0.01 eth. Now, if you take a closer look at **TrustfulOracle.sol**, the way it works is that in order to set the price you must have a special role. There is no obvious way to get that role since it's initialized in the constructor. But, if you have looked at official instructions for this level on [damnvulnerabledefi.xyz](https://www.damnvulnerabledefi.xyz/), you would've noticed a bunch of random confusing numbers.
 
-As it turns out those are the 2 encoded private keys. You can decode them like this: HEX => ascii, ascii => base64. As a matter of fact those are the 2 private keys from trusted oracles, so we just need to find the way how to turn those keys in signer wallet with ethers.js and manipulate the price inside **TrustfulOracle.sol**. Firstly we'll set the price very low to buy, and then we'll set it to the whole balance of exchange so that once we sell we get all the funds.
+As it turns out those are the 2 encoded private keys. You can decode them like this: HEX => ascii, ascii => base64. As a matter of fact those are the 2 private keys from trusted oracles, so we just need to find a way how to turn those keys in a signer wallet with ethers.js and manipulate the price inside **TrustfulOracle.sol**. Firstly we'll set the price very low to buy, and then we'll set it to the whole balance of exchange so that once we sell we get all the funds.
 
 Solution code:
 
@@ -538,21 +537,21 @@ it('Exploit', async function () {
 
 ## 8 - Puppet
 
-Now, this challenge might look math intensive at first, but it's critical to understand these concepts because they are backbone of DEXs that utilize AMMs. Essentially we will solve the challenge with market manipulation. We will take advantage of the low liquidity inside Uniswap DVT pool.
+Now, this challenge might look math intensive at first, but it's critical to understand these concepts because they are the backbone of DEXs that utilize AMMs. Essentially we will solve the challenge with market manipulation. We will take advantage of the low liquidity inside the Uniswap DVT pool.
 
-The main contract is **PuppetPool.sol** that we need to drain funds from. In order to get all DVT tokens from pool, we have to strongly devalue DVT token so that required ETH deposit as collateral gets really low. Collateral is calculated based on DVT price that comes from UniSwap contract deployed earlier in the test.
+The main contract is **PuppetPool.sol** which we need to drain funds from. To get all DVT tokens from the pool, we have to strongly devalue DVT tokens so that the required ETH deposit as collateral gets really low. Collateral is calculated based on the DVT price that comes from the UniSwap contract deployed earlier in the test.
 
-Now, I wrote some comments inside solution script to help you understand what's going on. Long story short, UniSwap exchange for DVT token calculates 'price' of DVT based on ratio supplied in the pool. If there is a lot of DVT and less ETH, ETH becomes very valuable compared to DVT, and vice versa.
+I wrote some comments inside the solution script to help you understand what's going on. Long story short, UniSwap exchange for DVT token calculates the 'price' of DVT based on the ratio supplied in the pool. If there is a lot of DVT and less ETH, ETH becomes very valuable compared to DVT, and vice versa.
 
-The main formula that drives this behaviour is: `X * Y = k`  
+The main formula that drives this behavior is: `X * Y = k`  
 `X` is amount of ERC20 token (**DVT**)  
 `Y` is amount of ETH  
 `k` is the **constant** product, meaning that ratio will change in order to satisfy the product
 
-I encorouge you to do your own research on AMMs and UniSwap v1 for better understanding.
+I encourage you to do your own research on AMMs and UniSwap v1 for better understanding.
 
 Now, for the solution. Firstly we will deposit all available **DVT** in UniSwap exchange to strongly devalue the price. We will get around **9.9 ETH** for supplied DVT.
-Then, we will be able to borrow 100k DVT from **PuppetPool.sol** with supplying just around 18 ETH as collateral. We can get 1000 DVT back from UniSwap exchange with depositting around 10 ETH.
+Then, we will be able to borrow 100k DVT from **PuppetPool.sol** by supplying just around 18 ETH as collateral. We can get 1000 DVT back from UniSwap exchange by depositing around 10 ETH.
 
 Solution code:
 
@@ -612,11 +611,11 @@ it('Exploit', async function () {
 
 ## 9 - Puppet v2
 
-This challenge is very similiar to previous one, so I won't go in depth. Logic is exactly the same. It introduces UniSwap v2 contracts, so that might be interesting. Other than that, there is not much new happening.
+This challenge is very similar to the previous one, so I won't go in depth. The logic is exactly the same. It introduces UniSwap v2 contracts, so that might be interesting. Other than that, there is not much new happening.
 
-The difference here is that there is no ETH/ERC20 pair, rather we have WETH/ERC20 pair. UniSwap v2 introduces ERC20/ERC20 pairs, and to make cleaner codebase they only allow using Wrapped ETH (WETH) which is just an ERC20 representation of ETH.
+The difference here is that there is no ETH/ERC20 pair, rather we have WETH/ERC20 pair. UniSwap v2 introduces ERC20/ERC20 pairs, and to make a cleaner codebase they only allow using Wrapped ETH (WETH) which is just an ERC20 representation of ETH.
 
-To exploit this, we will follow the same logic from 8. challenge (Puppet). Fistly, we deposit all available DVT in WETH/DVT pool to devalue it. Once that's done we will be able to borrow all funds from **PuppetV2Pool.sol**. But, there is a catch. We need to exchange ETH for WETH because lender pool requires WETH. So once we have WETH we'll be able to borrow whole DVT from **PuppetV2Pool.sol**.
+To exploit this, we will follow the same logic from the 8. challenge (Puppet). Firstly, we deposit all available DVT in WETH/DVT pool to devalue it. Once that's done we will be able to borrow all funds from **PuppetV2Pool.sol**. But, there is a catch. We need to exchange ETH for WETH because the lender pool requires WETH. So once we have WETH we'll be able to borrow the whole DVT from **PuppetV2Pool.sol**.
 
 Solution code:
 
@@ -661,9 +660,9 @@ it('Exploit', async function () {
 
 ## 10 - Free Rider
 
-Alright, stepping up in complexity with this challenge just a litle bit. Let's see, we have 2 contracts: **FreeRiderNFTMarketplace.sol** and **FreeRiderBuyer.sol**. The goal is to buy 6 listed NFTs. So, once we buy them we will be rewarded with 45 ETH. Each NFT costs 15 ETH and our starting balance is 0.5 ETH.
+Alright, stepping up in complexity with this challenge just a little bit. Let's see, we have 2 contracts: **FreeRiderNFTMarketplace.sol** and **FreeRiderBuyer.sol**. The goal is to buy 6 listed NFTs. So, once we buy them we will be rewarded with 45 ETH. Each NFT costs 15 ETH and our starting balance is 0.5 ETH.
 
-First thing that comes to mind is flash loan of course. But it can't work because we won't be able to repay the loan even if we get the 45 ETH reward since all NFTs will cost 90 ETH. Or no? Let's see `_buyOne` function:
+The first thing that comes to mind is the flash loan of course. But it can't work because we won't be able to repay the loan even if we get the 45 ETH reward since all NFTs will cost 90 ETH. Or no? Let's see the `_buyOne` function:
 
 ```solidity
   function _buyOne(uint256 tokenId) private {
@@ -684,13 +683,13 @@ First thing that comes to mind is flash loan of course. But it can't work becaus
   }
 ```
 
-You could notice that contract pays the seller **after** it transfers NFT. That's wrong, basically it gives back money to buyer. We can easily exploit this, in `buyMany` which essentially calls `_buyOne` many times. We can call it for all 6 NFTs at once. All we need to do is to supply 15 ETH to pass first requirement:
+You could notice that contract pays the seller **after** it transfers NFT. That's wrong, basically, it gives back money to the buyer. We can easily exploit this, in `buyMany` which essentially calls `_buyOne` many times. We can call it for all 6 NFTs at once. All we need to do is to supply 15 ETH to pass the first requirement:
 
 ```solidity
 require(msg.value >= priceToPay, "Amount paid is not enough");
 ```
 
-We'll be able to repay the flash loan since we got NFTs for free basically, the only thing we need to be careful about is to correctly convert WETH to ETH and vice versa since our UniSwapV2 pool offers only WETH. We will make new **FreeRiderAttack.sol** contract that will perform this attack. First we borrow the loan in WETH, then convert it to ETH and buy 6 NFTs "for free". Once we have NFTs, we transfer them to **FreeRiderBuyer.sol** to get the reward and all we need to do is to convert enough ETH to WETH to repay the loan.
+We'll be able to repay the flash loan since we got NFTs for free basically, the only thing we need to be careful about is to correctly convert WETH to ETH and vice versa since our UniSwapV2 pool offers only WETH. We will make a new **FreeRiderAttack.sol** contract that will perform this attack. First, we borrow the loan in WETH, then convert it to ETH and buy 6 NFTs "for free". Once we have NFTs, we transfer them to **FreeRiderBuyer.sol** to get the reward and all we need to do is to convert enough ETH to WETH to repay the loan.
 
 Solution code:
 
@@ -843,13 +842,13 @@ it('Exploit', async function () {
 ## 11 - Backdoor
 
 This one's tough. I suggest you to do research about GnosisSafe wallets and proxy contracts before attempting or even reading this.
-So initially there is a team of 4 people using some kind of wallet registry (**WalletRegistry.sol**) that is used to create more secure wallets. As a reward, each team member will get 10 DVT tokens once they create their GnosisSafe wallet. **WalletRegistry.sol** just makes some security checks before handing them the tokens to wallet. It allows each team member to create wallet only once.
+So initially there is a team of 4 people using some kind of wallet registry (**WalletRegistry.sol**) that is used to create more secure wallets. As a reward, each team member will get 10 DVT tokens once they create their GnosisSafe wallet. **WalletRegistry.sol** just makes some security checks before handing them the tokens to the wallet. It allows each team member to create a wallet only once.
 
-The way this works is following. User has to create instance of **GnosisSafeProxy.sol** with **GnosisSafeProxyFactory.sol** contract. The logic implementation of the wallet is stored in a contract called **Singleton**. It's instance of **GnosisSafe.sol** contract and it's deployed only once for all GnosisSafe wallets. That's possible due to proxy desing pattern, so only thing that you deploy once you create the wallet is the **GnosisSafeProxy.sol** that will basically `delegatecall` to implementation contract (singleton) all function calls. State is stored in the proxy. Now this all might sound confusing and it should. It took me few hours of watching differnet videos and reading articles to fully grasp how it all works. Once you fully comprehent the desing of these contracts continue on because exploit is not easy to understand as well at first.
+The way this works is the following. A user has to create an instance of **GnosisSafeProxy.sol** with **GnosisSafeProxyFactory.sol** contract. The logic implementation of the wallet is stored in a contract called **Singleton**. It's an instance of the **GnosisSafe.sol** contract and it's deployed only once for all GnosisSafe wallets. That's possible due to the proxy design pattern, so the only thing that you deploy once you create the wallet is the **GnosisSafeProxy.sol** that will basically `delegatecall` to the implementation contract (singleton) all function calls. The state is stored in the proxy. Now, this all might sound confusing and it should. It took me a few hours of watching different videos and reading articles to fully grasp how it all works. Once you fully comprehend the design of these contracts continue because the exploit is not easy to understand as well at first.
 
-There is a special functionality inside GnosisSafe contracts that allows you to add so called Modules on top of the wallet. It's made to allow more flexibility and functinality. But that's exactly where vulnerability comes in. The problem with this is that once we initialize the wallet, it allows you to delegatecall to arbitrary contract (module) with arbitrary data. What it means is that if you deploy your wallet through some malicous third party website, it can basically install a "backdoor" on your wallet and control your funds. For us this is not the exact exploit, but it's very similiar. Since no member of the team deployed a wallet, we can take advantage of it. We will initialize their wallets and approve us for wallet's DVT with our malicous module (because wallet will delegatecall our module), so once they receive it we can send it to us. This is the concept and explaination on a very high level, I will share the solution code below.
+There is a special functionality inside GnosisSafe contracts that allows you to add so-called Modules on top of the wallet. It's made to allow more flexibility and functionality. But that's exactly where vulnerability comes in. The problem with this is that once we initialize the wallet, it allows you to delegatecall to an arbitrary contract (module) with arbitrary data. What it means is that if you deploy your wallet through some malicious third-party website, it can basically install a "backdoor" on your wallet and control your funds. For us, this is not the exact exploit, but it's very similar. Since no member of the team deployed a wallet, we can take advantage of it. We will initialize their wallets and approve us for the wallet's DVT with our malicious module (because the wallet will delegatecall our module), so once they receive it we can send it to us. This is the concept and explanation on a very high level, I will share the solution code below.
 
-We need to make new **BackdoorAttack.sol** module contract. It will have `setupTokens()` and `exploit()` functions. First one will be called with delegatecall once the wallet proxy is being initialized and second is the starting point of the exploit. That's the function we will call, it will loop through team and for each member it will deploy new wallet using `createProxyWithCallback()` function inside **GnosisSafeProxyFactory.sol**. That will initiate the callback that we specify (**WalletRegistry.sol** `proxyCreated()`) function. Once the wallet registry send the tokens we will just transfer them to us and that's the whole exploit.
+We need to make a new **BackdoorAttack.sol** module contract. It will have `setupTokens()` and `exploit()` functions. First, one will be called with delegatecall once the wallet proxy is initialized and the second is the starting point of the exploit. That's the function we will call, it will loop through the team, and for each member, it will deploy a new wallet using the `createProxyWithCallback()` function inside **GnosisSafeProxyFactory.sol**. That will initiate the callback that we specify (**WalletRegistry.sol** `proxyCreated()`) function. Once the wallet registry sends the tokens we will just transfer them to us and that's the whole exploit.
 
 Solution code:
 
@@ -961,19 +960,19 @@ it('Exploit', async function () {
 });
 ```
 
-For the last challenge we have the Climber. It's not easy, but we'll get through it. Alright, let's see the code. We have **ClimberVault.sol** contract that acts as a vault that can distribute tokens to given address (maximum 1 ether every 15 days). But, you can call the function only if you are the owner of the contract. The real owner is actually **ClimberTimelock.sol** contract. Besides from that the vault has `sweepFunds()` function that allows you to sweep all the funds, but only if you have the sweeper role. Sweeper and Owner are set in constructor (initializer). It's worth noting that this challenge is another proxy design pattern called UUPS. All this means is that proxy owner upgradeability functinoalities are stored inside implementation contract.
+For the last challenge, we have the Climber. It's not easy, but we'll get through it. Alright, let's see the code. We have **ClimberVault.sol** contract that acts as a vault that can distribute tokens to a given address (maximum 1 ether every 15 days). But, you can call the function only if you are the owner of the contract. The real owner is actually **ClimberTimelock.sol** contract. Besides that, the vault has a `sweepFunds()` function that allows you to sweep all the funds, but only if you have the sweeper role. Sweeper and Owner are set in the constructor (initializer). It's worth noting that this challenge is another proxy design pattern called UUPS. All this means is that proxy owner upgradeability functionalities are stored inside the implementation contract.
 
-Now the **ClimberTimelock.sol** contract. There is no obvious entry inside the vault contract so let's look at the owner contract. It looks like it can execute transactions that can be scheduled only by proposer role. It uses role based access control and we as attacker don't have any roles. `execute()` is the only function that we can access, it executes scheduled transaction, but how we execute anything if we can't schedule it? Well the vulnerability is actually a common violation of check-effect-interaction function design. You can notice that `execute()` first executes transaction and only then it checks if it was scheduled.
+Now the **ClimberTimelock.sol** contract. There is no obvious entry inside the vault contract so let's look at the owner contract. It looks like it can execute transactions that can be scheduled only by the proposer role. It uses role-based access control and we as attackers don't have any roles. `execute()` is the only function that we can access, it executes a scheduled transaction, but how do we execute anything if we can't schedule it? Well, the vulnerability is actually a common violation of the check-effect-interaction function design. You can notice that `execute()` first executes the transaction and only then it checks if it was scheduled.
 
-We can take advantage of this by getting basically inside the function, running some transactions and the only key is that one of those transaction has to actually schedule all of them. This way we will pass the requirement:
+We can take advantage of this by getting basically inside the function, running some transactions and the only key is that one of those transactions has to actually schedule all of them. This way we will pass the requirement:
 
 ```solidity
 require(getOperationState(id) == OperationState.ReadyForExecution);
 ```
 
-There are couple of things we need to do in order to pass as well. Delay for transaction from being scheduled to being executed must be 0, we can set it using `updateDelay()` function. For calling the `schedule()` we need proposer role so we have to grant us that role using `grantRole()`. This is possible because the timelock contract will call itself, msg.sender will actually be the **ClimberTimelock.sol** which has owner role granted by itself in constructor.
+There are a couple of things we need to do in order to pass as well. The delay for the transaction from being scheduled to be executed must be 0, we can set it using the `updateDelay()` function. For calling the `schedule()` we need a proposer role so we have to grant ourselves that role using `grantRole()`. This is possible because the timelock contract will call itself, msg.sender will actually be the **ClimberTimelock.sol** which has an owner role granted by itself in the constructor.
 
-Now the exact steps for the exploit are following. First we will make new **ClimberAttack.sol** contract. We will setup all neccessary calls inside it. Firstly we update delay to 0 and grant us the proposer role. After that we transfer ownership of vault to us and schedule all calls so transaction goes through. This way we are the owner of the vault. Now we can upgrade the implementation logic of proxy to new malicous vault. For that we will create our **VaultUpgradedAttack.sol** contract. Since there is no way to grant ourselves the sweeper role, we can just set `sweepFunds` modifier to `onlyOwner` and that will allow us to call it. After carefully matching state variables with proxy, we just need to add empty `_authorizeUpgrade()` function because override is required for virtual functions.
+Now the exact steps for the exploit are following. First, we will make a new **ClimberAttack.sol** contract. We will set up all necessary calls inside it. Firstly we update the delay to 0 and grant us the proposer role. After that, we transfer ownership of the vault to us and schedule all calls so the transaction goes through. This way we are the owner of the vault. Now we can upgrade the implementation logic of the proxy to a new malicious vault. For that, we will create our **VaultUpgradedAttack.sol** contract. Since there is no way to grant ourselves the sweeper role, we can just set the `sweepFunds` modifier to the `onlyOwner` and that will allow us to call it. After carefully matching state variables with proxy, we just need to add an empty `_authorizeUpgrade()` function because override is required for virtual functions.
 
 Solution code:
 
