@@ -6,6 +6,21 @@ Creator [@tinchoabbate](https://twitter.com/tinchoabbate)
 Website [damnvulnerabledefi.xyz](https://www.damnvulnerabledefi.xyz/)  
 Github [repository](https://github.com/tinchoabbate/damn-vulnerable-defi/tree/v2.0.0)
 
+# Index
+
+1 - [Unstoppable](#1---Unstoppable)  
+2 - [Naive Receiver](#2---Naive-Receiver)  
+3 - [Truster](#3---Truster)  
+4 - [Side Entrance](#4---Side-Entrance)  
+5 - [The Rewarder](#5---The-Rewarder)  
+6 - [Selfie](#6---Selfie)  
+7 - [Compromised](#7---Compromised)  
+8 - [Puppet](#8---Puppet)  
+9 - [Puppet v2](#9---Puppet-v2)  
+10 - [Free Rider](#10---Free-Rider)  
+11 - [Backdoor](#11---Backdoor)  
+12 - [Climber](#12---Climber)
+
 ## 1 - Unstoppable
 
 The goal of this challenge is to disable flash loan lender contract. We are looking for a DoS attack.
@@ -959,6 +974,8 @@ it('Exploit', async function () {
   await attackContract.exploit(users, setupData);
 });
 ```
+
+## 12 - Climber
 
 For the last challenge, we have the Climber. It's not easy, but we'll get through it. Alright, let's see the code. We have **ClimberVault.sol** contract that acts as a vault that can distribute tokens to a given address (maximum 1 ether every 15 days). But, you can call the function only if you are the owner of the contract. The real owner is actually **ClimberTimelock.sol** contract. Besides that, the vault has a `sweepFunds()` function that allows you to sweep all the funds, but only if you have the sweeper role. Sweeper and Owner are set in the constructor (initializer). It's worth noting that this challenge is another proxy design pattern called UUPS. All this means is that proxy owner upgradeability functionalities are stored inside the implementation contract.
 
